@@ -1,0 +1,28 @@
+[project]
+name = "ba-font-replacer"
+version = "0.1.0"
+description = "Replace UI font assets in Blue Archive bundle files."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "unitypy>=1.23",
+    "typed-argument-parser>=1.12",
+]
+
+[project.scripts]
+bafr = "bafr.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bafr"]
