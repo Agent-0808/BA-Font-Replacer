@@ -450,11 +450,18 @@ def replace_lang_fonts(
             return []
         # 家族名：基础名 + 资产名字重后缀（如 NotoSansTC-Medium → "Source Han Sans SC Medium"）
         weight_suffix = ref.font_name.rsplit("-", 1)[-1].title() if "-" in ref.font_name else weight
-        targets_by_bundle.setdefault(ref.bundle_path, {})[ref.font_name] = ReplaceTarget(
+        target = ReplaceTarget(
             font_name=ref.font_name,
             font_data=data,
             family_name=f"{family} {weight_suffix}",
         )
+        bundle_targets = targets_by_bundle.setdefault(ref.bundle_path, {})
+        existing = bundle_targets.get(ref.font_name)
+        if existing is not None and existing.font_data != target.font_data:
+            # 多字重共用一个 Font 资产但输入不同（如 th 的 Normal/Bold 同指 RSU_BOLD）
+            log(f"  > ⚠️ Font '{ref.font_name}' is referenced by multiple weights with different "
+                f"input fonts; using the '{weight}' input.")
+        bundle_targets[ref.font_name] = target
 
     output_dir.mkdir(parents=True, exist_ok=True)
     reports: list[ReplaceReport] = []

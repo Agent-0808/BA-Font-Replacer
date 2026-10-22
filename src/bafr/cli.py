@@ -4,13 +4,13 @@ BAFR 命令行入口。
 
 用法：
   bafr scan    [--game-path PATH]
-  bafr replace --lang tw --normal X.otf --bold Y.otf [--output-dir work]
+  bafr replace tw X.otf [Y.otf] [--output-dir output]
 """
 
 from argparse import RawTextHelpFormatter
 from pathlib import Path
 
-from tap import Tap
+from tap import Positional, Tap
 
 from .fonts import (
     FontRef,
@@ -54,10 +54,10 @@ Examples:
 class ReplaceTap(BaseTap):
     """Replace命令：替换指定语言的 UI 字体并输出产物 bundle。"""
 
-    lang: str  # Language code to replace (e.g. "tw"), as shown by the scan command.
-    normal: Path  # Path to the .otf/.ttf font file for the Normal weight.
-    bold: Path  # Path to the .otf/.ttf font file for the Bold weight.
-    output_dir: Path = Path('./work/')  # Directory to save the modified bundle file(s).
+    lang: Positional[str]  # Language code to replace (e.g. "tw"), as shown by the scan command.
+    normal: Positional[Path]  # Path to the .otf/.ttf font file for the Normal weight.
+    bold: Positional[Path | None] = None  # Bold weight font; falls back to the Normal font if omitted.
+    output_dir: Path = Path('./output/')  # Directory to save the modified bundle file(s).
     game_path: Path | None = None  # Game install path. Auto-detected from the registry if omitted.
     region: BARegion = 'auto'  # Game region used to auto-detect the install path (auto = global first, then japan).
     family: str = "Source Han Sans SC"  # Font family name written into the Font assets (weight suffix is appended).
@@ -68,16 +68,23 @@ class ReplaceTap(BaseTap):
 
     def configure(self) -> None:
         super().configure()
+        # Tap 的可选 positional 需显式 nargs="?"（带默认值仍会被 argparse 视为必填）
+        self.add_argument('bold', nargs='?', type=Path, default=None,
+                          help='(Path, optional) Bold weight font; falls back to the Normal font if omitted.')
         self.description = '''Replace UI font assets (legacy Font path) for a language and output modified bundles.
 
 Examples:
   # Replace the tw (Traditional Chinese) fonts with Source Han Sans SC
-  bafr replace --lang tw \\
-      --normal "C:\\Windows\\Fonts\\SourceHanSansSC-Medium.otf" \\
-      --bold "C:\\Windows\\Fonts\\SourceHanSansSC-Bold.otf"
+  bafr replace tw "C:\\Windows\\Fonts\\SourceHanSansSC-Medium.otf" "C:\\Windows\\Fonts\\SourceHanSansSC-Bold.otf"
+
+  # Replace the en (English) fonts with Segoe UI (preinstalled on Windows)
+  bafr replace en "C:\\Windows\\Fonts\\segoeui.ttf" "C:\\Windows\\Fonts\\segoeuib.ttf"
+
+  # Single font file for both weights
+  bafr replace th myfont.otf
 
   # Custom output directory
-  bafr replace --lang tw --normal a.otf --bold b.otf --output-dir "D:\\out"
+  bafr replace kr a.otf b.otf --output-dir "D:\\out"
 '''
 
 
@@ -125,7 +132,7 @@ def handle_scan(args: ScanTap) -> None:
         print(f"{'lang':<6} {'weight':<8} {'font_name':<28} bundle")
         for ref in refs:
             _print_ref(ref)
-        print("\nUse `bafr replace --lang <lang> --normal <otf> --bold <otf>` to replace.")
+        print("\nUse `bafr replace <lang> <normal.otf> [bold.otf]` to replace.")
     else:
         print("❌ No font mappings found.")
     print("=" * 50)
@@ -143,14 +150,14 @@ def handle_replace(args: ReplaceTap) -> None:
     print(f"Game directory: {game_dir}")
     print(f"Language: {args.lang}")
     print(f"Normal font: {args.normal}")
-    print(f"Bold font: {args.bold}")
+    print(f"Bold font: {args.bold if args.bold else f'{args.normal} (same as Normal)'}")
     print(f"Output directory: {args.output_dir.resolve()}")
 
     reports: list[ReplaceReport] = replace_lang_fonts(
         game_dir=game_dir,
         lang=args.lang,
         normal_path=args.normal,
-        bold_path=args.bold,
+        bold_path=args.bold if args.bold else args.normal,
         output_dir=args.output_dir,
         log=print,
         family=args.family,
