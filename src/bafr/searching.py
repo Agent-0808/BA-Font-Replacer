@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from .bundle import Bundle, BundleFileInfo, get_cab_names
-from .naming import parse_filename
+from .naming import PRELOAD_PREFIX, parse_filename
 from .utils import LogFunc, no_log
 
 # 相对游戏根目录的资源搜索目录（按实际存在性筛选）
@@ -113,7 +113,8 @@ def find_cab_bundles(
     在搜索目录的全部 bundle 中查找内部 SerializedFile 名（CAB-xxx）匹配的物理 bundle。
 
     优先用轻量头部解析（get_cab_names，不解压数据块），解析失败时回退 Bundle.load；
-    按文件大小升序扫描以尽快命中，超过 max_bundle_size 的文件直接跳过。
+    扫描分两批：先扫 prolog 前缀包（ui-font 引用的字体包历史上均位于 prolog 组），
+    未命中时警告并回退全量扫描；找到全部目标后提前退出。
     提供 cache_path 时先查缓存（按路径+大小+mtime 校验有效性，不符则重扫），
     扫描结果写回缓存。
 
@@ -140,9 +141,8 @@ def find_cab_bundles(
         if cached:
             log(f"  > {len(cached)} CAB target(s) resolved from cache.")
 
-    # 2. 扫描未命中的 CAB（小文件优先）
+    # 2. 扫描未命中的 CAB（候选按大小升序，小文件优先）
     if remaining:
-        # 收集候选并按大小升序
         candidates: list[Path] = []
         for dir in search_dirs:
             if not dir.is_dir():
@@ -155,32 +155,48 @@ def find_cab_bundles(
                         candidates.append(Path(entry.path))
         candidates.sort(key=lambda p: p.stat().st_size)
 
-        log(f"  > Scanning {len(candidates)} bundle(s) for {len(remaining)} CAB target(s)...")
-        total = len(candidates)
-        progress_step = max(1, total // 20)  # 每 5% 打印一次
-        for idx, bundle_path in enumerate(candidates):
-            if not remaining:
-                break
-            if (idx + 1) % progress_step == 0 or idx + 1 == total:
-                log(f"  > Progress: {((idx + 1) * 100) // total}% ({idx + 1}/{total})")
-            # 轻量解析仅读头部 blockinfo；失败时回退全量加载
-            names = get_cab_names(bundle_path)
-            if names is None:
-                bundle = Bundle.load(bundle_path, log)
-                if bundle is None:
-                    continue
-                try:
-                    names = {getattr(sf, "name", "") for sf in bundle.env.assets}
-                except Exception:
-                    continue
-            hit = names & remaining
-            if hit:
-                for cab in hit:
-                    found[cab] = bundle_path
-                    remaining.discard(cab)
-                    log(f"  > CAB match: {cab} -> {bundle_path.name}")
-                if cache is not None:
-                    cache.update({cab: bundle_path for cab in hit})
+        def scan(batch: list[Path], label: str) -> None:
+            """按大小升序扫一批 bundle，命中的 CAB 记入 found 并写回缓存"""
+            nonlocal remaining
+            if not remaining or not batch:
+                return
+            log(f"  > Scanning {len(batch)} {label} bundle(s) for {len(remaining)} CAB target(s)...")
+            total = len(batch)
+            progress_step = max(1, total // 20)  # 每 5% 打印一次
+            for idx, bundle_path in enumerate(batch):
+                if not remaining:
+                    break
+                if (idx + 1) % progress_step == 0 or idx + 1 == total:
+                    log(f"    > Progress: {((idx + 1) * 100) // total}% ({idx + 1}/{total})")
+                # 轻量解析仅读头部 blockinfo；失败时回退全量加载
+                names = get_cab_names(bundle_path)
+                if names is None:
+                    bundle = Bundle.load(bundle_path, log)
+                    if bundle is None:
+                        continue
+                    try:
+                        names = {getattr(sf, "name", "") for sf in bundle.env.assets}
+                    except Exception:
+                        continue
+                hit = names & remaining
+                if hit:
+                    for cab in hit:
+                        found[cab] = bundle_path
+                        remaining.discard(cab)
+                        log(f"  > CAB match: {cab} -> {bundle_path.name}")
+                    if cache is not None:
+                        cache.update({cab: bundle_path for cab in hit})
+
+        # 第一批：prolog 前缀初筛（正常情况下字体包全部在此，毫秒级）
+        primary = [p for p in candidates if p.name.startswith(tuple(PRELOAD_PREFIX))]
+        scan(primary, "prolog")
+
+        # 兜底：第一批未命中说明字体包位置随版本变动，警告后全量扫描
+        if remaining:
+            log(f"  > ⚠️ {len(remaining)} CAB target(s) not found in prolog bundles, "
+                f"falling back to full scan (unexpected).")
+            primary_set = set(primary)
+            scan([p for p in candidates if p not in primary_set], "remaining")
 
         if remaining:
             log(f"  > ⚠️ CAB target(s) not found: {', '.join(sorted(remaining))}")
