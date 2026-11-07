@@ -11,6 +11,7 @@ BAFR 命令行入口。
 
 from argparse import RawTextHelpFormatter
 from pathlib import Path
+from typing import Literal
 
 from tap import Positional, Tap
 
@@ -22,6 +23,9 @@ from .fonts import (
 )
 from .installer import InstallReport, apply_bundles, restore_bundles
 from .paths import BARegion, DEFAULT_CACHE_PATH, resolve_game_dir
+
+# CLI 层展示的支持语言（引擎按 scan 结果动态枚举语言，游戏新增语言时只需扩充此处）
+BALang = Literal["en", "tw", "kr", "th"]
 
 
 class BaseTap(Tap):
@@ -57,7 +61,7 @@ Examples:
 class ReplaceTap(BaseTap):
     """Replace命令：替换指定语言的 UI 字体并输出产物 bundle。"""
 
-    lang: Positional[str]  # Language code to replace (e.g. "tw"), as shown by the scan command.
+    lang: Positional[BALang]  # Language code to replace, as shown by the scan command.
     normal: Positional[Path]  # Path to the .otf/.ttf font file for the Normal weight.
     bold: Positional[Path | None] = None  # Bold weight font; falls back to the Normal font if omitted.
     output_dir: Path = Path('./output/')  # Directory to save the modified bundle file(s).
@@ -94,7 +98,7 @@ Examples:
 class ApplyTap(BaseTap):
     """Apply命令：备份游戏目录中的原版 bundle，并用产物覆盖。"""
 
-    output_dir: Path = Path('./output/')  # Directory containing the bundles to apply (replace output).
+    output_dir: Positional[Path] = Path('./output/')  # Directory containing the bundles to apply (replace output).
     backup_dir: Path = Path('./backup/')  # Directory to store backups of the original game bundles.
     game_path: Path | None = None  # Game install path. Auto-detected from the registry if omitted.
     region: BARegion = 'auto'  # Game region used to auto-detect the install path (auto = global first, then japan).
@@ -102,6 +106,9 @@ class ApplyTap(BaseTap):
 
     def configure(self) -> None:
         super().configure()
+        # Tap 的可选 positional 需显式 nargs="?"（带默认值仍会被 argparse 视为必填）
+        self.add_argument('output_dir', nargs='?', type=Path, default=Path('./output/'),
+                          help='(Path, optional) Directory containing the bundles to apply; defaults to ./output/.')
         self.description = '''Back up the original bundles in the game directory and overwrite them with the output bundles.
 
 Files in the game directory identified as original (no trailing bytes) are backed
@@ -111,25 +118,37 @@ Examples:
   # Apply all bundles in ./output/ (auto-detect game path)
   bafr apply
 
-  # Custom directories and force overwrite
-  bafr apply --output-dir out --backup-dir bak --force
+  # Explicit output directory
+  bafr apply D:/path/to/output
+
+  # Force overwrite of modified files
+  bafr apply --force
+
+  # Explicit backup directory
+  bafr apply D:/path/to/output --backup-dir D:/path/to/bak
 '''
 
 
 class RestoreTap(BaseTap):
     """Restore命令：把备份目录中的原版 bundle 还原到游戏目录（回滚 apply）。"""
 
-    backup_dir: Path = Path('./backup/')  # Directory containing the original bundle backups.
+    backup_dir: Positional[Path] = Path('./backup/')  # Directory containing the original bundle backups.
     game_path: Path | None = None  # Game install path. Auto-detected from the registry if omitted.
     region: BARegion = 'auto'  # Game region used to auto-detect the install path (auto = global first, then japan).
 
     def configure(self) -> None:
         super().configure()
+        # Tap 的可选 positional 需显式 nargs="?"（带默认值仍会被 argparse 视为必填）
+        self.add_argument('backup_dir', nargs='?', type=Path, default=Path('./backup/'),
+                          help='(Path, optional) Directory containing the original bundle backups; defaults to ./backup/.')
         self.description = '''Restore the original bundles from the backup directory to the game directory (roll back apply).
 
 Examples:
   # Restore all backups in ./backup/ (auto-detect game path)
   bafr restore
+
+  # Explicit backup directory
+  bafr restore D:/path/to/bak
 '''
 
 
