@@ -5,6 +5,8 @@ BAFR 命令行入口。
 用法：
   bafr scan    [--game-path PATH]
   bafr replace tw X.otf [Y.otf] [--output-dir output]
+  bafr apply   [--output-dir output] [--backup-dir backup] [--force]
+  bafr restore [--backup-dir backup]
 """
 
 from argparse import RawTextHelpFormatter
@@ -18,6 +20,7 @@ from .fonts import (
     replace_lang_fonts,
     scan_game_fonts,
 )
+from .installer import InstallReport, apply_bundles, restore_bundles
 from .paths import BARegion, DEFAULT_CACHE_PATH, resolve_game_dir
 
 
@@ -88,6 +91,48 @@ Examples:
 '''
 
 
+class ApplyTap(BaseTap):
+    """Apply命令：备份游戏目录中的原版 bundle，并用产物覆盖。"""
+
+    output_dir: Path = Path('./output/')  # Directory containing the bundles to apply (replace output).
+    backup_dir: Path = Path('./backup/')  # Directory to store backups of the original game bundles.
+    game_path: Path | None = None  # Game install path. Auto-detected from the registry if omitted.
+    region: BARegion = 'auto'  # Game region used to auto-detect the install path (auto = global first, then japan).
+    force: bool = False  # Allow overwriting targets that are corrupted or modified without a backup.
+
+    def configure(self) -> None:
+        super().configure()
+        self.description = '''Back up the original bundles in the game directory and overwrite them with the output bundles.
+
+Files in the game directory identified as original (no trailing bytes) are backed
+up to --backup-dir; files already modified are only overwritten when a backup exists.
+
+Examples:
+  # Apply all bundles in ./output/ (auto-detect game path)
+  bafr apply
+
+  # Custom directories and force overwrite
+  bafr apply --output-dir out --backup-dir bak --force
+'''
+
+
+class RestoreTap(BaseTap):
+    """Restore命令：把备份目录中的原版 bundle 还原到游戏目录（回滚 apply）。"""
+
+    backup_dir: Path = Path('./backup/')  # Directory containing the original bundle backups.
+    game_path: Path | None = None  # Game install path. Auto-detected from the registry if omitted.
+    region: BARegion = 'auto'  # Game region used to auto-detect the install path (auto = global first, then japan).
+
+    def configure(self) -> None:
+        super().configure()
+        self.description = '''Restore the original bundles from the backup directory to the game directory (roll back apply).
+
+Examples:
+  # Restore all backups in ./backup/ (auto-detect game path)
+  bafr restore
+'''
+
+
 class MainTap(BaseTap):
     """主Tap类，包含所有子命令。"""
 
@@ -96,6 +141,8 @@ class MainTap(BaseTap):
         self.add_subparsers(dest='command', help='Available commands')
         self.add_subparser('scan', ScanTap, help='Scan game resources and list font language mappings.')
         self.add_subparser('replace', ReplaceTap, help='Replace UI font assets for a language.')
+        self.add_subparser('apply', ApplyTap, help='Back up originals and apply output bundles to the game directory.')
+        self.add_subparser('restore', RestoreTap, help='Restore original bundles from the backup directory.')
 
 
 def _resolve_game_dir(game_path: Path | None, region: BARegion) -> Path | None:
@@ -189,9 +236,74 @@ def handle_replace(args: ReplaceTap) -> None:
     print("=" * 50)
 
 
+def _print_install_reports(reports: list[InstallReport]) -> bool:
+    """打印安装/回滚结果汇总，返回是否全部成功。"""
+    success = True
+    for report in reports:
+        status = "✅" if report.ok else "⚠️"
+        print(f"{status} {report.name}: {report.message}")
+        success = success and report.ok
+    return success
+
+
+def handle_apply(args: ApplyTap) -> None:
+    """处理 'apply' 命令的逻辑。"""
+    print("--- BAFR Apply ---")
+    game_dir = _resolve_game_dir(args.game_path, args.region)
+    if game_dir is None or not game_dir.is_dir():
+        print(f"❌ Game directory not found: {game_dir or '(auto-detect failed)'}")
+        print("   Provide --game-path explicitly.")
+        return
+
+    print(f"Game directory: {game_dir}")
+    print(f"Output directory: {args.output_dir.resolve()}")
+    print(f"Backup directory: {args.backup_dir.resolve()}")
+
+    reports = apply_bundles(game_dir, args.output_dir, args.backup_dir, args.force, log=print)
+
+    print("\n" + "=" * 50)
+    if not reports:
+        print("❌ Apply failed: nothing processed.")
+        return
+    success = _print_install_reports(reports)
+    if success:
+        print(f"\n✅ Apply successful. Launch the game to verify; run `bafr restore` to roll back.")
+    else:
+        print("\n⚠️ Apply finished with warnings/failures. Check the log above.")
+    print("=" * 50)
+
+
+def handle_restore(args: RestoreTap) -> None:
+    """处理 'restore' 命令的逻辑。"""
+    print("--- BAFR Restore ---")
+    game_dir = _resolve_game_dir(args.game_path, args.region)
+    if game_dir is None or not game_dir.is_dir():
+        print(f"❌ Game directory not found: {game_dir or '(auto-detect failed)'}")
+        print("   Provide --game-path explicitly.")
+        return
+
+    print(f"Game directory: {game_dir}")
+    print(f"Backup directory: {args.backup_dir.resolve()}")
+
+    reports = restore_bundles(game_dir, args.backup_dir, log=print)
+
+    print("\n" + "=" * 50)
+    if not reports:
+        print("❌ Restore failed: nothing processed.")
+        return
+    success = _print_install_reports(reports)
+    if success:
+        print("\n✅ Restore successful. Original bundles are back in place.")
+    else:
+        print("\n⚠️ Restore finished with warnings/failures. Check the log above.")
+    print("=" * 50)
+
+
 COMMAND_HANDLERS = {
     'scan': handle_scan,
     'replace': handle_replace,
+    'apply': handle_apply,
+    'restore': handle_restore,
 }
 
 
