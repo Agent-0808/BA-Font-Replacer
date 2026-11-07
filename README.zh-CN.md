@@ -15,7 +15,7 @@
 
 支持 Windows 下的 Steam 国际服或日服，可自动从注册表探测游戏路径，也支持手动指定路径。
 
-`scan` 仅查询当前各语言的字体映射，`replace` 执行实际替换，无需手动操作 bundle。
+`scan` 仅查询当前各语言的字体映射，`replace` 执行实际替换并输出产物，`apply` 备份原版并覆盖到游戏目录，`restore` 一键回滚，无需手动操作 bundle。
 
 支持语言：
 - en（English）
@@ -90,7 +90,7 @@ uv run bafr replace kr a.otf b.otf --output-dir "D:\out"
 
 | 参数 | 说明 |
 | --- | --- |
-| `lang` | 语言代码（`tw` / `en` / `kr` / `th` 等），以 `scan` 的输出为准，大小写不敏感 |
+| `lang` | 语言代码（`en` / `tw` / `kr` / `th`），以 `scan` 的输出为准 |
 | `normal` | Normal 字重的 `.otf` / `.ttf` 字体文件 |
 | `bold` | Bold 字重的字体文件，省略时使用 `normal` |
 | `--output-dir` | 产物输出目录，默认 `./output/` |
@@ -112,16 +112,47 @@ Bundle: prologdepengroup-assets-_mx-uis-_mxcommon-_mxprolog-2026-03-13_assets_al
   Verify: OK
 ```
 
+### `apply`：备份原版并覆盖到游戏目录
+
+把产物目录中的全部 bundle 备份并覆盖到游戏目录对应位置：
+
+```bash
+# 覆盖 ./output/ 中的全部产物（自动探测游戏路径，备份到 ./backup/）
+uv run bafr apply
+
+# 指定产物目录与备份目录
+uv run bafr apply "D:\out" --backup-dir "D:\bak"
+
+# 允许覆盖损坏或已修改且无备份的目标文件
+uv run bafr apply --force
+```
+
+覆盖前的安全检查：
+
+- 产物自检：CRC 与文件名不符的产物会被跳过（请重新 `replace`）
+- 原版判定：仅未被修改过的原版文件（无尾部修正字节）才写入备份；已有备份时保留原备份，不会被改过的文件覆盖
+- 已被修改且无备份的文件默认拒绝覆盖，需 `--force`
+- 覆盖后回读自检：整文件 CRC 必须等于文件名中的目标值；游戏运行中文件被占用会明确报错
+
+### `restore`：从备份回滚
+
+```bash
+# 把 ./backup/ 中的原版还原回游戏目录
+uv run bafr restore
+
+# 指定备份目录
+uv run bafr restore "D:\bak"
+```
+
 ## 使用流程
 
 1. 运行 `bafr scan` 确认目标语言的字体映射与对应的 bundle 文件名。
 2. 运行 `bafr replace <lang> <normal.otf> [bold.otf]`，产物保存在 `--output-dir`。
-3. **备份**游戏目录中原版的同名 bundle 文件。
-4. 用产物覆盖游戏目录中同名的原版文件（默认位于 `BlueArchive_Data/StreamingAssets/PUB/Resource/Preload/Windows/`）。
-5. 启动游戏验证效果；如需回滚，还原第 3 步的备份即可。
+3. 运行 `bafr apply`，工具会自动备份原版文件到 `--backup-dir`，并覆盖游戏目录中的同名文件。
+4. 启动游戏验证效果；如需回滚，运行 `bafr restore`。
 
 > [!WARNING]
-> 请务必先备份原版文件。工具只负责生成产物，不会自动替换游戏目录中的文件。
+> 第 3 步也可以手动完成：备份游戏目录中原版的同名 bundle，再用产物覆盖（原版位于 `BlueArchive_Data/StreamingAssets/PUB/Resource/Preload/Windows/`）。除 `apply` / `restore` 外，工具不会修改游戏目录。
 
 ## 当前字体映射（Steam 国际服）
 
@@ -165,9 +196,11 @@ BAMT 以 GPL-3.0 授权，本项目复用其代码，整体同样遵循 GPL-3.0�
 uv run pytest
 
 # 查看帮助
-uv run bafr --help
-uv run bafr scan --help
-uv run bafr replace --help
+uv run bafr -h
+uv run bafr scan -h
+uv run bafr replace -h
+uv run bafr apply -h
+uv run bafr restore -h
 ```
 
 ### 文件结构
@@ -176,8 +209,9 @@ uv run bafr replace --help
 BA-Font-Replacer/
 ├── src/bafr/
 │ ├── __init__.py
-│ ├── cli.py         # 命令行入口（scan / replace）
+│ ├── cli.py         # 命令行入口（scan / replace / apply / restore）
 │ ├── fonts.py       # 核心业务：BundleFonts 解析、Font 替换、自检
+│ ├── installer.py   # apply/restore：原版备份、覆盖与回滚
 │ ├── bundle.py      # Bundle 封装、轻量 CAB 名解析
 │ ├── naming.py      # 文件名解析
 │ ├── searching.py   # 资源目录搜索与 CAB 定位、缓存

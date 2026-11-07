@@ -15,7 +15,7 @@ A small UnityPy-based CLI tool for replacing UI fonts (legacy `Font` assets) per
 
 Supports the Steam Global and JP servers on Windows, auto-detecting the game path from the registry, or you can specify the path manually.
 
-`scan` only reports the current font mappings per language; `replace` performs the actual replacement. No manual bundle handling required.
+`scan` only reports the current font mappings per language, `replace` performs the actual replacement and writes the output bundles, `apply` backs up the originals and overwrites the game directory, and `restore` rolls back in one command. No manual bundle handling required.
 
 Supported languages:
 - en (English)
@@ -90,7 +90,7 @@ Arguments:
 
 | Argument | Description |
 | --- | --- |
-| `lang` | Language code (`tw` / `en` / `kr` / `th`, etc.), as shown by `scan`; case-insensitive |
+| `lang` | Language code (`en` / `tw` / `kr` / `th`), as shown by `scan` |
 | `normal` | `.otf` / `.ttf` font file for the Normal weight |
 | `bold` | Font file for the Bold weight; falls back to `normal` if omitted |
 | `--output-dir` | Output directory, defaults to `./output/` |
@@ -112,16 +112,47 @@ Bundle: prologdepengroup-assets-_mx-uis-_mxcommon-_mxprolog-2026-03-13_assets_al
   Verify: OK
 ```
 
+### `apply`: back up originals and overwrite the game directory
+
+Backs up and overwrites the game bundles with all bundles in the output directory:
+
+```bash
+# Apply all bundles in ./output/ (auto-detect game path, back up to ./backup/)
+uv run bafr apply
+
+# Explicit output and backup directories
+uv run bafr apply "D:\out" --backup-dir "D:\bak"
+
+# Allow overwriting targets that are corrupted or modified without a backup
+uv run bafr apply --force
+```
+
+Safety checks before overwriting:
+
+- Output self-check: bundles whose CRC does not match their filename are skipped (run `replace` again)
+- Original detection: only untouched original files (no trailing fix bytes) are written to the backup directory; an existing backup is always kept and never overwritten by a modified file
+- Files that are already modified and have no backup are rejected unless `--force` is given
+- Post-write self-check: the whole-file CRC must equal the value in the filename; a locked file (game running) is reported clearly
+
+### `restore`: roll back from backups
+
+```bash
+# Restore the originals in ./backup/ to the game directory
+uv run bafr restore
+
+# Explicit backup directory
+uv run bafr restore "D:\bak"
+```
+
 ## Workflow
 
 1. Run `bafr scan` to confirm the font mapping and bundle filename for your target language.
 2. Run `bafr replace <lang> <normal.otf> [bold.otf]`; the output is written to `--output-dir`.
-3. **Back up** the original bundle file(s) with the same name in the game directory.
-4. Overwrite the original file(s) with the generated ones (usually under `BlueArchive_Data/StreamingAssets/PUB/Resource/Preload/Windows/`).
-5. Launch the game to verify; to roll back, restore the backups from step 3.
+3. Run `bafr apply`: the tool backs up the original files to `--backup-dir` and overwrites the same-named files in the game directory.
+4. Launch the game to verify; to roll back, run `bafr restore`.
 
 > [!WARNING]
-> Always back up the original files first. The tool only generates output files; it never modifies the game directory on its own.
+> Step 3 can also be done manually: back up the original bundle file(s) in the game directory, then overwrite them with the generated ones (usually under `BlueArchive_Data/StreamingAssets/PUB/Resource/Preload/Windows/`). Apart from `apply` / `restore`, the tool never modifies the game directory.
 
 ## Current Font Mappings (Steam Global)
 
@@ -168,6 +199,8 @@ uv run pytest
 uv run bafr --help
 uv run bafr scan --help
 uv run bafr replace --help
+uv run bafr apply --help
+uv run bafr restore --help
 ```
 
 ### Project Structure
@@ -176,8 +209,9 @@ uv run bafr replace --help
 BA-Font-Replacer/
 ├── src/bafr/
 │ ├── __init__.py
-│ ├── cli.py         # CLI entry point (scan / replace)
+│ ├── cli.py         # CLI entry point (scan / replace / apply / restore)
 │ ├── fonts.py       # Core logic: BundleFonts parsing, Font replacement, verification
+│ ├── installer.py   # apply/restore: original backup, overwrite, and rollback
 │ ├── bundle.py      # Bundle wrapper, lightweight CAB name parsing
 │ ├── naming.py      # Bundle filename parsing
 │ ├── searching.py   # Resource directory search, CAB lookup, cache
