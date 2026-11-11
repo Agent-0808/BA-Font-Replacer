@@ -23,6 +23,10 @@
 - tw（繁體中文/Traditional Chinese）
 - th（ไทย/Thai）。
 
+| 替换前 | 替换后 |
+| :---: | :---: |
+| ![替换前](docs/before.png) | ![替换后](docs/after.png) |
+
 ## 环境要求
 
 - Windows 10 及以上（游戏路径自动探测依赖 Windows 注册表）

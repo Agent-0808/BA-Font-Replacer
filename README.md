@@ -23,6 +23,10 @@ Supported languages:
 - tw (繁體中文/Traditional Chinese)
 - th (ไทย/Thai).
 
+| Before | After |
+| :---: | :---: |
+| ![Before](docs/before.png) | ![After](docs/after.png) |
+
 ## Requirements
 
 - Windows 10 or later (game path auto-detection relies on the Windows registry)
